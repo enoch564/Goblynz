@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Goblynz Den</title>
+    
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #000; 
+            font-family: 'Courier New', Courier, monospace;
+            position: relative;
+        }
+
+        .hidden { display: none !important; }
+
+        /* Fullscreen containers */
+        #landing-page, #cutscene-video, #app-container, #white-fade {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100;
+        }
+
+        /* --- GOBLIN LANDING PAGE --- */
+        #landing-page {
+            background-color: black;
+            display: flex; justify-content: center; align-items: center;
+            z-index: 200; overflow: hidden;
+        }
+
+        #landing-image {
+            width: 100%; height: 100%; object-fit: contain;
+        }
+
+        /* Interactive Hotspots */
+        .hotspot {
+            position: absolute; cursor: pointer; border-radius: 10px;
+            background: rgba(136, 204, 0, 0.0); 
+            z-index: 250; pointer-events: auto;
+        }
+        .hotspot:active { background: rgba(136, 204, 0, 0.2); }
+
+        #hotspot-play {
+            width: 50%; height: 9%; top: 71%; left: 25%; 
+        }
+        #hotspot-discord {
+            width: 50%; height: 9%; top: 82.5%; left: 25%; 
+        }
+
+        /* --- SKIP BUTTON --- */
+        #skip-btn {
+            position: absolute; top: 20px; right: 20px; z-index: 300;
+            background: rgba(0, 0, 0, 0.6); color: white; border: 2px solid #88cc00;
+            padding: 8px 15px; border-radius: 5px; font-weight: bold; font-family: sans-serif;
+            cursor: pointer; font-size: 14px; letter-spacing: 1px; pointer-events: auto;
+        }
+
+        /* --- TRANSITION FADE --- */
+        #white-fade {
+            background-color: #ffffff; z-index: 150;
+            transition: opacity 2s ease-in-out; pointer-events: none;
+        }
+
+        /* --- 3D APP --- */
+        #app-container { z-index: 50; background-color: #050505; }
+        #3d-world { width: 100%; height: 100%; }
+
+        /* --- PURE CSS GOBLIN CONTROLS --- */
+        .mobile-controls {
+            position: absolute; bottom: 30px; left: 20px;
+            width: 150px; z-index: 1000; pointer-events: none; 
+            display: flex; flex-direction: column; align-items: center;
+        }
+
+        .row { display: flex; justify-content: center; margin: 3px 0; gap: 6px; }
+
+        .nav-btn {
+            width: 55px; height: 55px;
+            background-color: rgba(10, 15, 5, 0.6); 
+            border: 2px solid rgba(136, 204, 0, 0.6); 
+            border-radius: 12px; outline: none;
+            color: #88cc00; font-size: 22px;
+            display: flex; justify-content: center; align-items: center;
+            pointer-events: auto; touch-action: manipulation;
+            -webkit-user-select: none; user-select: none;
+            transition: all 0.1s ease-in-out;
+            box-shadow: 0px 4px 10px rgba(0,0,0,0.5);
+        }
+
+        .nav-btn:active {
+            transform: scale(0.9);
+            background-color: rgba(136, 204, 0, 0.4);
+            border-color: #aaff00;
+            color: #ffffff;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="landing-page">
+        <img src="landing.png" id="landing-image" alt="Goblynz Den Landing">
+        <div id="hotspot-play" class="hotspot"></div>
+        <div id="hotspot-discord" class="hotspot"></div>
+    </div>
+
+    <video id="cutscene-video" class="hidden" playsinline width="100%" height="100%" style="object-fit: contain; background: black;">
+        <source src="goblynz.mp4" type="video/mp4">
+    </video>
+    <button id="skip-btn" class="hidden">SKIP ⏭</button>
+
+    <audio id="background-audio" loop muted>
+        <source src="atpeace.mp3" type="audio/mpeg">
+    </audio>
+
+    <div id="white-fade" class="hidden"></div>
+
+    <div id="app-container" class="hidden">
+        <div id="3d-world"></div>
+        <div class="mobile-controls hidden" id="mobile-nav">
+            <div class="row"><button class="nav-btn up" id="nav-up">▲</button></div>
+            <div class="row">
+                <button class="nav-btn left" id="nav-left">◀</button>
+                <button class="nav-btn down" id="nav-down">▼</button>
+                <button class="nav-btn right" id="nav-right">▶</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        const ART_COUNT = 15;
+        const CUTSCENE_DURATION_MS = 48000; 
+        const RADIUS_OUTER = 35; 
+        const RADIUS_INNER = 22; 
+        const HALL_HEIGHT = 6;
+        
+        const MOVE_SPEED = 0.25; 
+        const LOOK_SPEED = 0.005; 
+
+        let scene, camera, renderer;
+        let floorTexture, wallTexture, ceilingTexture;
+        const moveState = { forward: 0, backward: 0, left: 0, right: 0 };
+        let lookRotation = new THREE.Euler(0, 0, 0, 'YXZ'); 
+
+        const DOM = {
+            landing: document.getElementById('landing-page'),
+            hotspotPlay: document.getElementById('hotspot-play'),
+            hotspotDiscord: document.getElementById('hotspot-discord'),
+            skipBtn: document.getElementById('skip-btn'),
+            video: document.getElementById('cutscene-video'),
+            audio: document.getElementById('background-audio'),
+            whiteFade: document.getElementById('white-fade'),
+            app: document.getElementById('app-container'),
+            mobileNav: document.getElementById('mobile-nav')
+        };
+
+        let cutsceneTimeout;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a0a);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            camera.position.set(28.5, 1.8, 0); 
+            lookRotation.y = Math.PI / 2; 
+            camera.rotation.copy(lookRotation);
+            
+            const headlamp = new THREE.PointLight(0xffffff, 0.3, 30);
+            camera.add(headlamp);
+            scene.add(camera);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('3d-world').appendChild(renderer.domElement);
+
+            loadTextures();
+        }
+
+        function loadTextures() {
+            const textureLoader = new THREE.TextureLoader();
+
+            floorTexture = textureLoader.load('floor.jpg', (tex) => { tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(40, 5); });
+            wallTexture = textureLoader.load('wall.jpg', (tex) => { tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(30, 2); }); 
+            ceilingTexture = textureLoader.load('ceiling.jpg', (tex) => { tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(40, 5); }); 
+
+            const artTextures = [];
+            for (let i = 1; i <= ART_COUNT; i++) {
+                artTextures.push(textureLoader.load(`art${i}.jpg`));
+            }
+
+            buildEndlessHallway(artTextures);
+        }
+
+        function buildEndlessHallway(artTextures) {
+            const outerWallGeo = new THREE.CylinderGeometry(RADIUS_OUTER, RADIUS_OUTER, HALL_HEIGHT, 64, 1, true);
+            const outerWall = new THREE.Mesh(outerWallGeo, new THREE.MeshLambertMaterial({ map: wallTexture, side: THREE.BackSide }));
+            outerWall.position.y = HALL_HEIGHT / 2;
+            scene.add(outerWall);
+
+            const innerWallGeo = new THREE.CylinderGeometry(RADIUS_INNER, RADIUS_INNER, HALL_HEIGHT, 64, 1, true);
+            const innerWall = new THREE.Mesh(innerWallGeo, new THREE.MeshLambertMaterial({ map: wallTexture, side: THREE.FrontSide }));
+            innerWall.position.y = HALL_HEIGHT / 2;
+            scene.add(innerWall);
+
+            const ringGeo = new THREE.RingGeometry(RADIUS_INNER, RADIUS_OUTER, 64);
+            const floor = new THREE.Mesh(ringGeo, new THREE.MeshLambertMaterial({ map: floorTexture, side: THREE.DoubleSide }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const ceiling = new THREE.Mesh(ringGeo, new THREE.MeshLambertMaterial({ map: ceilingTexture, side: THREE.DoubleSide }));
+            ceiling.rotation.x = -Math.PI / 2;
+            ceiling.position.y = HALL_HEIGHT;
+            scene.add(ceiling);
+
+            const artGeo = new THREE.PlaneGeometry(3, 4); 
+            const frameGeo = new THREE.BoxGeometry(3.3, 4.3, 0.2); 
+            const frameMat = new THREE.MeshPhongMaterial({ color: 0xD4AF37 }); 
+
+            const bulbGeo = new THREE.SphereGeometry(0.25, 16, 16);
+            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
+
+            for (let i = 0; i < ART_COUNT; i++) {
+                const angle = (i / ART_COUNT) * Math.PI * 2; 
+                
+                const artGroup = new THREE.Group();
+                const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+                artGroup.add(frameMesh);
+
+                const artMat = new THREE.MeshLambertMaterial({ map: artTextures[i] });
+                const artMesh = new THREE.Mesh(artGeo, artMat);
+                artMesh.position.z = 0.11; 
+                artGroup.add(artMesh);
+
+                artGroup.position.x = Math.sin(angle) * (RADIUS_OUTER - 0.2);
+                artGroup.position.z = Math.cos(angle) * (RADIUS_OUTER - 0.2);
+                artGroup.position.y = HALL_HEIGHT / 2;
+                artGroup.lookAt(0, HALL_HEIGHT / 2, 0); 
+                scene.add(artGroup);
+
+                const bx = Math.sin(angle) * 28.5; 
+                const bz = Math.cos(angle) * 28.5;
+                
+                const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+                bulb.position.set(bx, HALL_HEIGHT - 0.3, bz);
+                scene.add(bulb);
+
+                const pointLight = new THREE.PointLight(0xffffff, 0.8, 25);
+                pointLight.position.set(bx, HALL_HEIGHT - 0.5, bz);
+                scene.add(pointLight);
+            }
+        }
+
+        function startCutscene() {
+            DOM.landing.classList.add('hidden');
+            DOM.video.classList.remove('hidden');
+            DOM.skipBtn.classList.remove('hidden');
+
+            DOM.video.muted = false; 
+            DOM.video.play().catch(e => console.log(e));
+            DOM.audio.play().catch(e => console.log(e));
+
+            cutsceneTimeout = setTimeout(transitionToWorld, CUTSCENE_DURATION_MS);
+        }
+
+        function skipCutscene() {
+            clearTimeout(cutsceneTimeout); 
+            transitionToWorld(); 
+        }
+
+        function transitionToWorld() {
+            DOM.whiteFade.classList.remove('hidden');
+            DOM.whiteFade.style.opacity = '1';
+
+            DOM.video.pause();
+            DOM.video.classList.add('hidden'); 
+            DOM.skipBtn.classList.add('hidden');
+
+            DOM.audio.muted = false; 
+            if (DOM.audio.paused) DOM.audio.play().catch(e => console.log(e));
+
+            DOM.app.classList.remove('hidden'); 
+            DOM.mobileNav.classList.remove('hidden'); 
+
+            setupEventListeners();
+            animate(); 
+
+            setTimeout(() => {
+                DOM.whiteFade.style.opacity = '0';
+                setTimeout(() => DOM.whiteFade.classList.add('hidden'), 2000); 
+            }, 100);
+        }
+
+        DOM.hotspotPlay.addEventListener('click', startCutscene);
+        DOM.hotspotDiscord.addEventListener('click', () => { window.open("https://discord.gg/goblynz", "_blank"); });
+        DOM.skipBtn.addEventListener('click', skipCutscene);
+
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                DOM.audio.pause();
+                DOM.video.pause();
+            } else {
+                if (!DOM.app.classList.contains('hidden') || !DOM.video.classList.contains('hidden')) {
+                    DOM.audio.play().catch(e => console.log(e));
+                }
+                if (!DOM.video.classList.contains('hidden')) {
+                    DOM.video.play().catch(e => console.log(e));
+                }
+            }
+        });
+
+        function setupEventListeners() {
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+            if (isTouchDevice) {
+                // --- MULTI-TOUCH MOBILE CONTROLS ---
+                const applyMovement = (dir, val) => { moveState[dir] = val; };
+                const addEvents = (selector, dir) => {
+                    const btn = DOM.mobileNav.querySelector(selector);
+                    btn.addEventListener('touchstart', (e) => { e.preventDefault(); applyMovement(dir, 1); });
+                    btn.addEventListener('touchend', (e) => { e.preventDefault(); applyMovement(dir, 0); });
+                    // touchcancel prevents you from getting stuck moving if your thumb slides off
+                    btn.addEventListener('touchcancel', (e) => { e.preventDefault(); applyMovement(dir, 0); }); 
+                };
+
+                addEvents('.up', 'forward');
+                addEvents('.down', 'backward');
+                addEvents('.left', 'left');
+                addEvents('.right', 'right');
+
+                // Track the specific finger used for looking around
+                let lookTouchId = null;
+                let touchStartX, touchStartY;
+
+                window.addEventListener('touchstart', (e) => {
+                    // Loop through newly placed fingers
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        let touch = e.changedTouches[i];
+                        // If this finger didn't touch the D-pad, assign it as the "look" finger
+                        if (!touch.target.closest('#mobile-nav') && lookTouchId === null) {
+                            lookTouchId = touch.identifier;
+                            touchStartX = touch.clientX;
+                            touchStartY = touch.clientY;
+                            break;
+                        }
+                    }
+                }, {passive: false});
+
+                window.addEventListener('touchmove', (e) => {
+                    if (lookTouchId === null) return;
+
+                    // Find the assigned "look" finger and track its movement
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        let touch = e.changedTouches[i];
+                        if (touch.identifier === lookTouchId) {
+                            if (e.cancelable) e.preventDefault(); // Stop screen dragging/scrolling
+
+                            lookRotation.y -= (touch.clientX - touchStartX) * LOOK_SPEED;
+                            lookRotation.x -= (touch.clientY - touchStartY) * LOOK_SPEED; 
+                            lookRotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, lookRotation.x));
+                            camera.rotation.copy(lookRotation);
+
+                            touchStartX = touch.clientX;
+                            touchStartY = touch.clientY;
+                            break;
+                        }
+                    }
+                }, {passive: false});
+
+                window.addEventListener('touchend', (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === lookTouchId) {
+                            lookTouchId = null; // Free up the look finger when lifted
+                            break;
+                        }
+                    }
+                });
+
+                window.addEventListener('touchcancel', (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === lookTouchId) {
+                            lookTouchId = null;
+                            break;
+                        }
+                    }
+                });
+
+            } else {
+                // --- DESKTOP CONTROLS ---
+                DOM.mobileNav.classList.add('hidden'); 
+
+                renderer.domElement.addEventListener('click', () => {
+                    renderer.domElement.requestPointerLock();
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement === renderer.domElement) {
+                        lookRotation.y -= (e.movementX || 0) * LOOK_SPEED;
+                        lookRotation.x -= (e.movementY || 0) * LOOK_SPEED;
+                        lookRotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, lookRotation.x));
+                        camera.rotation.copy(lookRotation);
+                    }
+                });
+
+                document.addEventListener('keydown', (e) => {
+                    switch (e.code) {
+                        case 'KeyW': case 'ArrowUp': moveState.forward = 1; break;
+                        case 'KeyS': case 'ArrowDown': moveState.backward = 1; break;
+                        case 'KeyA': case 'ArrowLeft': moveState.left = 1; break;
+                        case 'KeyD': case 'ArrowRight': moveState.right = 1; break;
+                    }
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    switch (e.code) {
+                        case 'KeyW': case 'ArrowUp': moveState.forward = 0; break;
+                        case 'KeyS': case 'ArrowDown': moveState.backward = 0; break;
+                        case 'KeyA': case 'ArrowLeft': moveState.left = 0; break;
+                        case 'KeyD': case 'ArrowRight': moveState.right = 0; break;
+                    }
+                });
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (moveState.forward) camera.translateZ(-MOVE_SPEED);
+            if (moveState.backward) camera.translateZ(MOVE_SPEED);
+            if (moveState.left) camera.translateX(-MOVE_SPEED);
+            if (moveState.right) camera.translateX(MOVE_SPEED);
+
+            camera.position.y = 1.8; 
+            
+            const distFromCenter = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
+            const safeOuter = RADIUS_OUTER - 2; 
+            const safeInner = RADIUS_INNER + 2; 
+
+            if (distFromCenter > safeOuter || distFromCenter < safeInner) {
+                const angle = Math.atan2(camera.position.z, camera.position.x);
+                const forcedRadius = distFromCenter > safeOuter ? safeOuter : safeInner;
+                camera.position.x = Math.cos(angle) * forcedRadius;
+                camera.position.z = Math.sin(angle) * forcedRadius;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
